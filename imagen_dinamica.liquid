@@ -5,6 +5,15 @@
   - object-fit: contain | cover | fill
 {% endcomment %}
 
+<style>
+  .imgd-section {
+    margin-inline: auto;
+    width: 1560px;
+    max-width: 97%;
+    margin: 0 auto;
+  }
+</style>
+
 <section class="imgd-section" id="section-{{ section.id }}">
   {% assign desk = section.settings.desktop_img %}
   {% assign mobi = section.settings.mobile_img %}
