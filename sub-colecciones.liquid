@@ -1,0 +1,73 @@
+{% comment %}
+  Sección: Sub-colecciones (por marca/colección)
+  - Muestra divs con <h2> por cada colección referenciada en:
+    a) collection.metafields.custom.sub_colecciones  (lista de colecciones)
+    b) metaobject.sub_colecciones                    (lista de colecciones)
+  - Orden: si existe el metafield en la colección actual, se usa; si no, intenta metaobjeto.
+{% endcomment %}
+
+<section id="sub-colecciones-{{ section.id }}" class="sub-colecciones">
+  <div class="contenedor">
+    {% assign items = blank %}
+
+    {%- if collection and collection.metafields.custom.sub_colecciones != blank -%}
+      {% assign items = collection.metafields.custom.sub_colecciones.value %}
+    {%- elsif metaobject and metaobject.sub_colecciones != blank -%}
+      {% assign items = metaobject.sub_colecciones.value %}
+    {%- endif -%}
+
+    <div class="subco-grid">
+      {%- for col in items -%}
+        {%- comment -%} cada item es un objeto de colección {%- endcomment -%}
+        <div class="subco-card">
+          <h2 class="subco-title">
+            <a href="{{ col.url }}">{{ col.title | escape }}</a>
+          </h2>
+        </div>
+      {%- endfor -%}
+    </div>
+  </div>
+</section>
+
+<style>
+  #sub-colecciones-{{ section.id }} .subco-card {
+    padding: 12px;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    background: #fff;
+  }
+  #sub-colecciones-{{ section.id }} .subco-title {
+    margin: 0;
+    font-size: 1.125rem;
+    line-height: 1.3;
+  }
+  #sub-colecciones-{{ section.id }} .subco-title a {
+    text-decoration: none;
+    color: inherit;
+  }
+</style>
+
+{% schema %}
+{
+  "name": "Sub-colecciones",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "show_empty_message",
+      "label": "Mostrar mensaje si no hay sub-colecciones",
+      "default": false
+    },
+    {
+      "type": "text",
+      "id": "empty_message",
+      "label": "Mensaje vacío",
+      "default": "No hay sub-colecciones configuradas."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Sub-colecciones (auto)"
+    }
+  ]
+}
+{% endschema %}
