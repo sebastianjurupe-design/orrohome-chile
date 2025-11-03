@@ -1,0 +1,30 @@
+{%- comment -%}
+  Rinde <li> de Splide para la variante dada.
+  Parámetros: variant, product
+{%- endcomment -%}
+{%- liquid
+  assign files = variant.metafields.custom.gallery.value
+-%}
+
+{%- if files and files.size > 0 -%}
+  {%- for file in files -%}
+    <li class="splide__slide">
+      <img
+        src="{{ file | image_url: width: 1600 }}"
+        alt="{{ product.title | escape }} - {{ variant.title | escape }}"
+        loading="lazy"
+      >
+    </li>
+  {%- endfor -%}
+{%- elsif variant.featured_media -%}
+  <li class="splide__slide">
+    {{ variant.featured_media | image_url: width: 1600 | img_tag: product.title }}
+  </li>
+{%- else -%}
+  {%- comment -%} fallback: usa media del producto {%- endcomment -%}
+  {%- for media in product.media limit: 6 -%}
+    <li class="splide__slide">
+      {{ media | image_url: width: 1600 | img_tag: product.title }}
+    </li>
+  {%- endfor -%}
+{%- endif -%}
