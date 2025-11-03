@@ -359,41 +359,116 @@
   {{ product | structured_data }}
 </script>
 
-{% comment %}
-  <script>
-    (function () {
-      function getVariantId() {
-        var el = document.querySelector('form[action^="/cart/add"] [name="id"]');
-        if (el && el.value) return String(el.value);
-        var m = location.search.match(/[?&]variant=(\d+)/);
-        return m ? m[1] : '{{ product.selected_or_first_available_variant.id }}';
+<script>
+  (function () {
+    var SLIDER_SEL = '#Product-Slider';
+    var SLIDE_SEL = SLIDER_SEL + ' .product-images__slide';
+    var THUMBS_SEL = '#Product-Thumbnails .product-thumbnail';
+
+    function getVariantId() {
+      var el = document.querySelector('form[action^="/cart/add"] [name="id"]');
+      if (el && el.value) return String(el.value);
+      var m = location.search.match(/[?&]variant=(\d+)/);
+      return m ? m[1] : '{{ product.selected_or_first_available_variant.id }}';
+    }
+
+    function getFlickity() {
+      var root = document.querySelector(SLIDER_SEL);
+      // En este theme, Flickity cuelga en root.flickity o en root.querySelector('.flickity-slider').parentNode.flickity
+      return (
+        (root && (root.flickity || root.__flkty || root.querySelector('.flickity-viewport')?.parentNode?.flickity)) ||
+        null
+      );
+    }
+
+    function firstVisibleIndex() {
+      var cells = Array.from(document.querySelectorAll(SLIDE_SEL));
+      for (var i = 0; i < cells.length; i++) {
+        if (cells[i].style.display !== 'none') return i;
       }
-      function toggle(vid) {
-        document.querySelectorAll('#Product-Slider .product-images__slide[data-variant]').forEach(function (n) {
-          n.style.display = String(n.getAttribute('data-variant')) === String(vid) ? '' : 'none';
-        });
-        document.querySelectorAll('#Product-Thumbnails [data-variant]').forEach(function (n) {
-          n.style.display = String(n.getAttribute('data-variant')) === String(vid) ? '' : 'none';
-        });
+      return 0;
+    }
+
+    function toggle(vid) {
+      var slides = document.querySelectorAll(SLIDE_SEL);
+      var thumbs = document.querySelectorAll(THUMBS_SEL);
+
+      // Slides: multimedia SIEMPRE visibles; variantes según data-variant; sin atributo -> visibles
+      slides.forEach(function (n) {
+        if (n.classList.contains('is-multimedia') || n.getAttribute('data-scope') === 'multimedia') {
+          n.style.display = '';
+          n.setAttribute('aria-hidden', 'false');
+          n.tabIndex = 0;
+          return;
+        }
+        var v = n.getAttribute('data-variant');
+        if (!v) {
+          n.style.display = ''; // global no marcada -> visible
+          n.setAttribute('aria-hidden', 'false');
+          n.tabIndex = 0;
+          return;
+        }
+        var show = String(v) === String(vid);
+        n.style.display = show ? '' : 'none';
+        n.setAttribute('aria-hidden', show ? 'false' : 'true');
+        n.tabIndex = show ? 0 : -1;
+      });
+
+      // Thumbnails: solo ocultamos las que estén marcadas con data-variant y no correspondan
+      thumbs.forEach(function (n) {
+        var v = n.getAttribute('data-variant');
+        n.style.display = v ? (String(v) === String(vid) ? '' : 'none') : '';
+      });
+
+      // Sincroniza Flickity (si existe)
+      var flkty = getFlickity();
+      if (flkty) {
+        // Selecciona la primera celda visible
+        var idx = firstVisibleIndex();
+        try {
+          flkty.select(idx, false, true);
+        } catch (e) {}
+        try {
+          flkty.resize();
+        } catch (e) {}
       }
+    }
+
+    function wire() {
+      // Primera pasada
       toggle(getVariantId());
+
+      // Cambios de selector/radio
       document.addEventListener('change', function (e) {
         if (e.target && e.target.name === 'id') toggle(String(e.target.value));
       });
+
+      // Eventos que suelen emitir los themes
       document.addEventListener('product:variant-change', function (e) {
-        var id = e?.detail?.variant?.id;
+        var id = e && e.detail && e.detail.variant && e.detail.variant.id;
         if (id) toggle(String(id));
       });
       document.addEventListener('variant:change', function (e) {
-        var id = e?.detail?.id || e?.detail?.variant?.id;
+        var id = (e && e.detail && (e.detail.id || (e.detail.variant && e.detail.variant.id))) || null;
         if (id) toggle(String(id));
       });
+
+      // Cambios por URL (?variant=…)
       window.addEventListener('popstate', function () {
         toggle(getVariantId());
       });
-    })();
-  </script>
-{% endcomment %}
+    }
+
+    // Aseguramos que Flickity ya montó
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () {
+        setTimeout(wire, 0);
+      });
+    } else {
+      setTimeout(wire, 0);
+    }
+  })();
+</script>
 
 {% schema %}
 {
