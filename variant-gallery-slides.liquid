@@ -80,13 +80,23 @@
                       if media.media_type == 'image'
                         assign image_index = image_index | default: 0 | plus: 1
                       endif
-
                       assign priority = false
                       if image_index == 0
                         assign first_image = media.preview_image
                         assign priority = 'high'
                       endif
                     -%}
+
+                    {%- assign force_variant_id = blank -%}
+                    {%- if media.attached_to_variant? -%}
+                      {%- for vv in product.variants -%}
+                        {%- if vv.featured_media and vv.featured_media.id == media.id -%}
+                          {%- assign force_variant_id = vv.id -%}
+                          {%- break -%}
+                        {%- endif -%}
+                      {%- endfor -%}
+                    {%- endif -%}
+
                     {%- render 'product-media',
                       product: product,
                       section: section,
@@ -97,13 +107,15 @@
                       media_aspect_ratio: media_aspect_ratio,
                       hide_variants: hide_variants,
                       priority: priority,
-                      display_captions: display_captions
+                      display_captions: display_captions,
+                      data_variant: force_variant_id
                     -%}
                   {%- endunless -%}
                 {%- endfor -%}
 
                 {%- comment -%} --- SLIDES EXTRA POR VARIANTE (metacampo usando product-media) --- {%- endcomment -%}
                 {%- for v in product.variants -%}
+                  {% assign variable_name = value %}
                   {%- assign files = v.metafields.custom.gallery.value -%}
                   {%- for f in files -%}
                     {%- assign extra_id = 'extra-'
@@ -364,102 +376,453 @@
     var SLIDER_SEL = '#Product-Slider';
     var SLIDE_SEL = SLIDER_SEL + ' .product-images__slide';
     var THUMBS_SEL = '#Product-Thumbnails .product-thumbnail';
+    var STASH_ID = 'VG-stash';
 
-    function getVariantId() {
-      var el = document.querySelector('form[action^="/cart/add"] [name="id"]');
-      if (el && el.value) return String(el.value);
-      var m = location.search.match(/[?&]variant=(\d+)/);
-      return m ? m[1] : '{{ product.selected_or_first_available_variant.id }}';
+    var DBG = true;
+    function log() {
+      if (DBG) console.log.apply(console, arguments);
     }
 
+    // Crea (si no existe) un contenedor oculto para guardar slides fuera de Flickity
+    function ensureStash() {
+      var stash = document.getElementById(STASH_ID);
+      if (!stash) {
+        stash = document.createElement('div');
+        stash.id = STASH_ID;
+        stash.style.display = 'none';
+        document.body.appendChild(stash);
+        log('[VG] stash created');
+      }
+      return stash;
+    }
+
+    // --- Estado global ---
+    var STATE = {
+      root: null,
+      flkty: null,
+      observer: null,
+      readyHooked: false,
+      pollTimer: null,
+      pollDeadline: 0,
+
+      // MASTER (solo se arma 1 vez) => nunca se pierde
+      masterSlides: [], // todos los elementos (aunque estén en el stash)
+      masterOrder: new Map(), // el índice original
+      groupsMaster: { global: [], byVariant: {} },
+
+      // Vista actual (lectura)
+      allSlidesDOM: [], // helper si lo necesitas ver en logs
+    };
+
+    // Identificador de un slide (para logs)
+    function idOf(el) {
+      return el?.id || el?.getAttribute?.('data-media-id') || '#' + (STATE.masterOrder.get(el) ?? '?');
+    }
+
+    // --- Variante actual ---
+    function getVariantId() {
+      log('[VG] getVariantId: enter');
+      var el = document.querySelector('form[action^="/cart/add"] [name="id"]');
+      if (el && el.value) {
+        log('[VG] getVariantId: from form =', String(el.value));
+        return String(el.value);
+      }
+      var m = location.search.match(/[?&]variant=(\d+)/);
+      var qv = m ? m[1] : '{{ product.selected_or_first_available_variant.id }}';
+      log('[VG] getVariantId: from URL/default =', qv);
+      return qv;
+    }
+
+    // --- Sniffer Flickity ---
+    function isFlkty(x) {
+      return !!(
+        x &&
+        typeof x === 'object' &&
+        typeof x.select === 'function' &&
+        typeof x.reloadCells === 'function' &&
+        typeof x.reposition === 'function' &&
+        typeof x.resize === 'function'
+      );
+    }
+    function sniffFlickity(root) {
+      log('[VG] sniffFlickity: enter root?', !!root);
+      if (!root) return null;
+
+      var vp = root.querySelector('.flickity-viewport');
+      var cands = [
+        root.flickity,
+        root.__flkty,
+        root._flickity,
+        root.flickityInstance,
+        root.flickityData,
+        vp && vp.parentNode && vp.parentNode.flickity,
+        vp && vp._flickity,
+      ];
+      for (var i = 0; i < cands.length; i++) {
+        if (isFlkty(cands[i])) {
+          log('[VG] sniffFlickity: found via known path #' + i);
+          return cands[i];
+        }
+      }
+      try {
+        for (var k in root)
+          if (isFlkty(root[k])) {
+            log('[VG] sniffFlickity: found at root.' + k);
+            return root[k];
+          }
+      } catch (e) {}
+      if (vp) {
+        try {
+          for (var kk in vp)
+            if (isFlkty(vp[kk])) {
+              log('[VG] sniffFlickity: found at viewport.' + kk);
+              return vp[kk];
+            }
+        } catch (e) {}
+      }
+      log('[VG] sniffFlickity: NOT found. class=', root.className, 'vp?', !!vp);
+      return null;
+    }
     function getFlickity() {
+      log('[VG] getFlickity: enter');
       var root = document.querySelector(SLIDER_SEL);
-      // En este theme, Flickity cuelga en root.flickity o en root.querySelector('.flickity-slider').parentNode.flickity
-      return (
-        (root && (root.flickity || root.__flkty || root.querySelector('.flickity-viewport')?.parentNode?.flickity)) ||
-        null
+      var inst = sniffFlickity(root);
+      log('[VG] getFlickity: found?', !!inst);
+      return inst;
+    }
+
+    // --- MASTER (solo una vez) ---
+    function buildMasterOnce() {
+      if (STATE.masterSlides.length) {
+        log('[VG] buildMasterOnce: already built');
+        return;
+      }
+
+      log('[VG] buildMasterOnce: building…');
+      var stash = ensureStash();
+      STATE.root = document.querySelector(SLIDER_SEL);
+
+      // Toma TODOS los slides que existan actualmente en el carrusel
+      var initialSlides = Array.from(document.querySelectorAll(SLIDE_SEL));
+
+      STATE.masterSlides = initialSlides.slice(); // copia
+      STATE.masterOrder.clear();
+      STATE.groupsMaster.global = [];
+      STATE.groupsMaster.byVariant = {};
+
+      STATE.masterSlides.forEach(function (el, i) {
+        STATE.masterOrder.set(el, i);
+        var isGlobal =
+          el.classList.contains('is-multimedia') ||
+          el.getAttribute('data-scope') === 'multimedia' ||
+          !el.hasAttribute('data-variant');
+        if (isGlobal) STATE.groupsMaster.global.push(el);
+        else {
+          var vid = String(el.getAttribute('data-variant'));
+          (STATE.groupsMaster.byVariant[vid] || (STATE.groupsMaster.byVariant[vid] = [])).push(el);
+        }
+      });
+
+      log(
+        '[VG] MASTER:',
+        '\n  total=',
+        STATE.masterSlides.length,
+        '\n  global=',
+        STATE.groupsMaster.global.length,
+        '\n  variants=',
+        Object.keys(STATE.groupsMaster.byVariant)
+          .map(function (k) {
+            return k + ':' + STATE.groupsMaster.byVariant[k].length;
+          })
+          .join(', ')
       );
     }
 
-    function firstVisibleIndex() {
-      var cells = Array.from(document.querySelectorAll(SLIDE_SEL));
-      for (var i = 0; i < cells.length; i++) {
-        if (cells[i].style.display !== 'none') return i;
-      }
-      return 0;
+    function desiredFromMaster(vid) {
+      var want = [].concat(STATE.groupsMaster.global, STATE.groupsMaster.byVariant[vid] || []);
+      want.sort(function (a, b) {
+        return STATE.masterOrder.get(a) - STATE.masterOrder.get(b);
+      });
+      log('[VG] desiredFromMaster len=', want.length, 'ids=', want.map(idOf));
+      return want;
     }
 
-    function toggle(vid) {
-      var slides = document.querySelectorAll(SLIDE_SEL);
-      var thumbs = document.querySelectorAll(THUMBS_SEL);
+    // --- Ayudas de lectura ---
+    function currentCells() {
+      if (STATE.flkty && STATE.flkty.cells) {
+        var els = STATE.flkty.cells.map(function (c) {
+          return c.element;
+        });
+        log('[VG] currentCells: Flickity=', els.length, els.map(idOf));
+        return els;
+      }
+      var vis = Array.from(document.querySelectorAll(SLIDE_SEL)).filter(function (el) {
+        return el.style.display !== 'none';
+      });
+      log('[VG] currentCells: DOM visible=', vis.length, vis.map(idOf));
+      return vis;
+    }
 
-      // Slides: multimedia SIEMPRE visibles; variantes según data-variant; sin atributo -> visibles
-      slides.forEach(function (n) {
-        if (n.classList.contains('is-multimedia') || n.getAttribute('data-scope') === 'multimedia') {
-          n.style.display = '';
-          n.setAttribute('aria-hidden', 'false');
-          n.tabIndex = 0;
-          return;
+    // --- Fallback DOM (sin Flickity) ---
+    function domToggle(vid) {
+      log('[VG] domToggle: enter vid=', vid);
+      // Asegura que lo visible exista en el DOM principal (saca del stash lo necesario)
+      var root = document.querySelector(SLIDER_SEL + ' .flickity-slider') || document.querySelector(SLIDER_SEL);
+      var stash = ensureStash();
+      var want = desiredFromMaster(vid);
+
+      // Mueve todo lo que deba estar visible desde el stash al root (si no está ya)
+      want.forEach(function (el) {
+        if (!root.contains(el)) {
+          stash.contains(el) && root.appendChild(el);
         }
-        var v = n.getAttribute('data-variant');
-        if (!v) {
-          n.style.display = ''; // global no marcada -> visible
-          n.setAttribute('aria-hidden', 'false');
-          n.tabIndex = 0;
-          return;
-        }
-        var show = String(v) === String(vid);
-        n.style.display = show ? '' : 'none';
-        n.setAttribute('aria-hidden', show ? 'false' : 'true');
-        n.tabIndex = show ? 0 : -1;
       });
 
-      // Thumbnails: solo ocultamos las que estén marcadas con data-variant y no correspondan
+      // Oculta los no deseados (moverlos al stash)
+      var allNow = Array.from(root.querySelectorAll('.product-images__slide'));
+      var toHide = allNow.filter(function (el) {
+        return want.indexOf(el) === -1;
+      });
+      toHide.forEach(function (el) {
+        stash.appendChild(el);
+      });
+
+      // Asegura visibilidad de los “want”
+      want.forEach(function (el) {
+        el.style.display = '';
+        el.tabIndex = 0;
+        el.setAttribute('aria-hidden', 'false');
+      });
+
+      log('[VG] domToggle: shown=', want.length, 'hidden moved to stash=', toHide.length);
+    }
+
+    // --- Sincronización con Flickity usando STASH ---
+    function syncFlickityTo(vid) {
+      log('[VG] syncFlickityTo: enter vid=', vid);
+      var flkty = STATE.flkty;
+      var root = document.querySelector(SLIDER_SEL + ' .flickity-slider');
+      var stash = ensureStash();
+      if (!flkty || !root) {
+        log('[VG] syncFlickityTo: NO flkty/root -> domToggle');
+        domToggle(vid);
+        return;
+      }
+
+      var want = desiredFromMaster(vid);
+      var have = currentCells();
+      var wantSet = new Set(want);
+      var haveSet = new Set(have);
+
+      // 1) Quitar sobrantes del carrusel y moverlos al stash (NO se pierden)
+      var toRemove = have.filter(function (el) {
+        return !wantSet.has(el);
+      });
+      if (toRemove.length) {
+        log('[VG] remove -> stash:', toRemove.length, toRemove.map(idOf));
+        try {
+          flkty.remove(toRemove);
+        } catch (e) {
+          console.warn('[VG] flkty.remove error', e);
+        }
+        toRemove.forEach(function (el) {
+          stash.appendChild(el);
+        });
+      } else {
+        log('[VG] remove: nothing to remove');
+      }
+
+      // 2) Insertar faltantes desde el stash en el orden correcto
+      have = currentCells();
+      haveSet = new Set(have);
+      var inserted = [];
+      want.forEach(function (el, idx) {
+        if (!haveSet.has(el)) {
+          // viene del stash (o nunca estuvo)
+          if (stash.contains(el)) {
+            // insertar en índice exacto si es posible
+            var insertIndex = idx;
+            if (idx > 0) {
+              var beforeEl = want[idx - 1];
+              var pos = have.indexOf(beforeEl);
+              insertIndex = pos >= 0 ? pos + 1 : have.length;
+            }
+            log('[VG] insert from stash:', idOf(el), 'at', insertIndex);
+            try {
+              flkty.insert(el, insertIndex);
+            } catch (e1) {
+              try {
+                flkty.append(el);
+              } catch (e2) {
+                console.warn('[VG] insert/append error', e1, e2);
+              }
+            }
+            inserted.push(idOf(el));
+            have = currentCells();
+            haveSet = new Set(have);
+          } else {
+            // Si por alguna razón no está en stash ni en have, intenta append
+            log('[VG] insert (not in stash!?):', idOf(el));
+            try {
+              flkty.insert(el, idx);
+            } catch (e3) {
+              try {
+                flkty.append(el);
+              } catch (e4) {}
+            }
+            have = currentCells();
+            haveSet = new Set(have);
+          }
+        }
+      });
+      if (!inserted.length) log('[VG] insert: nothing inserted');
+
+      // 3) Recalcular
+      try {
+        flkty.reloadCells();
+      } catch (e) {
+        log('[VG] reloadCells error', e);
+      }
+      try {
+        flkty.reposition();
+      } catch (e) {
+        log('[VG] reposition error', e);
+      }
+      try {
+        flkty.resize();
+      } catch (e) {
+        log('[VG] resize error', e);
+      }
+      try {
+        flkty.select(0, false, true);
+      } catch (e) {
+        log('[VG] select error', e);
+      }
+
+      requestAnimationFrame(function () {
+        try {
+          flkty.reposition();
+        } catch (e) {}
+        try {
+          flkty.positionSlider();
+        } catch (e) {}
+        log('[VG] RAF tick after sync');
+      });
+
+      var finalCells = currentCells();
+      log('[VG] synced: have=', finalCells.length, 'want=', want.length, 'vid=', vid);
+    }
+
+    // --- Thumbs + Toggle principal ---
+    function toggle(vid) {
+      log('[VG] toggle: enter vid=', vid);
+
+      // thumbs
+      var thumbs = document.querySelectorAll(THUMBS_SEL);
+      var t = { shown: 0, hidden: 0 };
       thumbs.forEach(function (n) {
         var v = n.getAttribute('data-variant');
-        n.style.display = v ? (String(v) === String(vid) ? '' : 'none') : '';
+        var show = v ? String(v) === String(vid) : true;
+        n.style.display = show ? '' : 'none';
+        show ? t.shown++ : t.hidden++;
       });
+      log('[VG] thumbs shown/hidden:', t);
 
-      // Sincroniza Flickity (si existe)
-      var flkty = getFlickity();
-      if (flkty) {
-        // Selecciona la primera celda visible
-        var idx = firstVisibleIndex();
-        try {
-          flkty.select(idx, false, true);
-        } catch (e) {}
-        try {
-          flkty.resize();
-        } catch (e) {}
+      // decidir ruta
+      STATE.flkty = getFlickity();
+      if (!STATE.flkty) {
+        log('[VG] toggle: path=DOM');
+        domToggle(vid);
+      } else {
+        log('[VG] toggle: path=Flickity');
+        syncFlickityTo(vid);
       }
     }
 
-    function wire() {
-      // Primera pasada
-      toggle(getVariantId());
+    // --- Esperar a Flickity (event + observer + polling) ---
+    function hookWhenReady() {
+      log('[VG] hookWhenReady: enter');
+      var root = document.querySelector(SLIDER_SEL);
+      if (!root || STATE.readyHooked) {
+        log('[VG] hookWhenReady: skip');
+        return;
+      }
+      STATE.readyHooked = true;
 
-      // Cambios de selector/radio
-      document.addEventListener('change', function (e) {
-        if (e.target && e.target.name === 'id') toggle(String(e.target.value));
+      root.addEventListener(
+        'ready.flickity',
+        function () {
+          log('[VG] ready.flickity (event)');
+          toggle(getVariantId());
+        },
+        { once: true }
+      );
+
+      STATE.observer = new MutationObserver(function () {
+        var enabled = root.classList.contains('flickity-enabled') || root.querySelector('.flickity-viewport');
+        if (enabled) {
+          log('[VG] MutationObserver: flickity-enabled detectado');
+          STATE.observer && STATE.observer.disconnect();
+          toggle(getVariantId());
+        }
       });
+      STATE.observer.observe(root, { attributes: true, childList: true, subtree: true });
 
-      // Eventos que suelen emitir los themes
+      // Poll de seguridad
+      STATE.pollDeadline = Date.now() + 6000;
+      if (STATE.pollTimer) clearInterval(STATE.pollTimer);
+      STATE.pollTimer = setInterval(function () {
+        STATE.flkty = getFlickity();
+        if (STATE.flkty) {
+          clearInterval(STATE.pollTimer);
+          log('[VG] poll: flkty FOUND -> toggle');
+          toggle(getVariantId());
+        } else if (Date.now() > STATE.pollDeadline) {
+          clearInterval(STATE.pollTimer);
+          log('[VG] poll: flkty NOT found (stay DOM)');
+        }
+      }, 200);
+    }
+
+    // --- Wire ---
+    function wire() {
+      log('[VG] wire: enter');
+      ensureStash();
+      buildMasterOnce();
+
+      var initVid = getVariantId();
+      log('[VG] init variant:', initVid);
+
+      // Primera pasada DOM (para que no se vea todo mezclado)
+      domToggle(initVid);
+      // Y quedar a la espera de Flickity para ir a modo carrusel
+      hookWhenReady();
+
+      // Listeners
+      document.addEventListener('change', function (e) {
+        if (e.target && e.target.name === 'id') {
+          var v = String(e.target.value);
+          log('[VG] change ->', v);
+          toggle(v);
+        }
+      });
       document.addEventListener('product:variant-change', function (e) {
-        var id = e && e.detail && e.detail.variant && e.detail.variant.id;
+        var id = e?.detail?.variant?.id;
+        log('[VG] product:variant-change event:', id);
         if (id) toggle(String(id));
       });
       document.addEventListener('variant:change', function (e) {
-        var id = (e && e.detail && (e.detail.id || (e.detail.variant && e.detail.variant.id))) || null;
+        var id = e?.detail?.id || e?.detail?.variant?.id;
+        log('[VG] variant:change event:', id);
         if (id) toggle(String(id));
       });
-
-      // Cambios por URL (?variant=…)
       window.addEventListener('popstate', function () {
-        toggle(getVariantId());
+        var v = getVariantId();
+        log('[VG] popstate ->', v);
+        toggle(v);
       });
     }
 
-    // Aseguramos que Flickity ya montó
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () {
         setTimeout(wire, 0);
