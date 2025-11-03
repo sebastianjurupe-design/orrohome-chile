@@ -371,530 +371,549 @@
 </script>
 
 <script>
-    (function () {
-      var SLIDER_SEL = '#Product-Slider';
-      var SLIDE_SEL = SLIDER_SEL + ' .product-images__slide';
-      var THUMBS_SEL = '#Product-Thumbnails .product-thumbnail';
-      var STASH_ID = 'VG-stash';
+  (function () {
+    var SLIDER_SEL = '#Product-Slider';
+    var SLIDE_SEL = SLIDER_SEL + ' .product-images__slide';
+    var THUMBS_SEL = '#Product-Thumbnails .product-thumbnail';
+    var STASH_ID = 'VG-stash';
+    var THUMBS_WRAPPER = '#Product-Thumbnails';
+    var THUMBS_STASH_ID = 'VG-stash-thumbs';
+    var DBG = true;
 
-      var DBG = true;
-      function log() {
-        if (DBG) console.log.apply(console, arguments);
+    function ensureThumbStash() {
+      var stash = document.getElementById(THUMBS_STASH_ID);
+      if (!stash) {
+        stash = document.createElement('div');
+        stash.id = THUMBS_STASH_ID;
+        stash.style.display = 'none';
+        document.body.appendChild(stash);
       }
+      return stash;
+    }
 
-      // Crea (si no existe) un contenedor oculto para guardar slides fuera de Flickity
-      function ensureStash() {
-        var stash = document.getElementById(STASH_ID);
-        if (!stash) {
-          stash = document.createElement('div');
-          stash.id = STASH_ID;
-          stash.style.display = 'none';
-          document.body.appendChild(stash);
-          log('[VG] stash created');
+    // map id/attr
+    function mediaIdOf(el) {
+      return el?.getAttribute?.('data-media-id') || '';
+    }
+
+    // Crea (si no existe) un contenedor oculto para guardar slides fuera de Flickity
+    function ensureStash() {
+      var stash = document.getElementById(STASH_ID);
+      if (!stash) {
+        stash = document.createElement('div');
+        stash.id = STASH_ID;
+        stash.style.display = 'none';
+        document.body.appendChild(stash);
+      }
+      return stash;
+    }
+
+    // --- Estado global ---
+    var STATE = {
+      root: null,
+      flkty: null,
+      observer: null,
+      readyHooked: false,
+      pollTimer: null,
+      pollDeadline: 0,
+
+      // MASTER (solo se arma 1 vez) => nunca se pierde
+      masterSlides: [], // todos los elementos (aunque estén en el stash)
+      masterOrder: new Map(), // el índice original
+      groupsMaster: { global: [], byVariant: {} },
+
+      // Vista actual (lectura)
+      allSlidesDOM: [], // helper si lo necesitas ver en logs
+
+      // MASTER de thumbs (solo una vez)
+      masterThumbs: [],
+      masterThumbOrder: new Map(),
+      groupsThumbMaster: { global: [], byVariant: {} },
+
+      // Mapa media-id -> índice original de slide (para ordenar thumbs como slides)
+      mediaIdToSlideIndex: new Map(),
+    };
+
+    // Identificador de un slide (para logs)
+    function idOf(el) {
+      return el?.id || el?.getAttribute?.('data-media-id') || '#' + (STATE.masterOrder.get(el) ?? '?');
+    }
+
+    // --- Variante actual ---
+    function getVariantId() {
+      var el = document.querySelector('form[action^="/cart/add"] [name="id"]');
+      if (el && el.value) {
+        return String(el.value);
+      }
+      var m = location.search.match(/[?&]variant=(\d+)/);
+      var qv = m ? m[1] : '{{ product.selected_or_first_available_variant.id }}';
+      return qv;
+    }
+
+    // --- Sniffer Flickity ---
+    function isFlkty(x) {
+      return !!(
+        x &&
+        typeof x === 'object' &&
+        typeof x.select === 'function' &&
+        typeof x.reloadCells === 'function' &&
+        typeof x.reposition === 'function' &&
+        typeof x.resize === 'function'
+      );
+    }
+    function sniffFlickity(root) {
+      if (!root) return null;
+
+      var vp = root.querySelector('.flickity-viewport');
+      var cands = [
+        root.flickity,
+        root.__flkty,
+        root._flickity,
+        root.flickityInstance,
+        root.flickityData,
+        vp && vp.parentNode && vp.parentNode.flickity,
+        vp && vp._flickity,
+      ];
+      for (var i = 0; i < cands.length; i++) {
+        if (isFlkty(cands[i])) {
+          return cands[i];
         }
-        return stash;
       }
-
-      // --- Estado global ---
-      var STATE = {
-        root: null,
-        flkty: null,
-        observer: null,
-        readyHooked: false,
-        pollTimer: null,
-        pollDeadline: 0,
-
-        // MASTER (solo se arma 1 vez) => nunca se pierde
-        masterSlides: [], // todos los elementos (aunque estén en el stash)
-        masterOrder: new Map(), // el índice original
-        groupsMaster: { global: [], byVariant: {} },
-
-        // Vista actual (lectura)
-        allSlidesDOM: [], // helper si lo necesitas ver en logs
-      };
-
-      // Identificador de un slide (para logs)
-      function idOf(el) {
-        return el?.id || el?.getAttribute?.('data-media-id') || '#' + (STATE.masterOrder.get(el) ?? '?');
-      }
-
-      // --- Variante actual ---
-      function getVariantId() {
-        log('[VG] getVariantId: enter');
-        var el = document.querySelector('form[action^="/cart/add"] [name="id"]');
-        if (el && el.value) {
-          log('[VG] getVariantId: from form =', String(el.value));
-          return String(el.value);
-        }
-        var m = location.search.match(/[?&]variant=(\d+)/);
-        var qv = m ? m[1] : '{{ product.selected_or_first_available_variant.id }}';
-        log('[VG] getVariantId: from URL/default =', qv);
-        return qv;
-      }
-
-      // --- Sniffer Flickity ---
-      function isFlkty(x) {
-        return !!(
-          x &&
-          typeof x === 'object' &&
-          typeof x.select === 'function' &&
-          typeof x.reloadCells === 'function' &&
-          typeof x.reposition === 'function' &&
-          typeof x.resize === 'function'
-        );
-      }
-      function sniffFlickity(root) {
-        log('[VG] sniffFlickity: enter root?', !!root);
-        if (!root) return null;
-
-        var vp = root.querySelector('.flickity-viewport');
-        var cands = [
-          root.flickity,
-          root.__flkty,
-          root._flickity,
-          root.flickityInstance,
-          root.flickityData,
-          vp && vp.parentNode && vp.parentNode.flickity,
-          vp && vp._flickity,
-        ];
-        for (var i = 0; i < cands.length; i++) {
-          if (isFlkty(cands[i])) {
-            log('[VG] sniffFlickity: found via known path #' + i);
-            return cands[i];
+      try {
+        for (var k in root)
+          if (isFlkty(root[k])) {
+            return root[k];
           }
-        }
+      } catch (e) {}
+      if (vp) {
         try {
-          for (var k in root)
-            if (isFlkty(root[k])) {
-              log('[VG] sniffFlickity: found at root.' + k);
-              return root[k];
+          for (var kk in vp)
+            if (isFlkty(vp[kk])) {
+              return vp[kk];
             }
         } catch (e) {}
-        if (vp) {
-          try {
-            for (var kk in vp)
-              if (isFlkty(vp[kk])) {
-                log('[VG] sniffFlickity: found at viewport.' + kk);
-                return vp[kk];
-              }
-          } catch (e) {}
+      }
+
+      return null;
+    }
+    function getFlickity() {
+      var root = document.querySelector(SLIDER_SEL);
+      var inst = sniffFlickity(root);
+      return inst;
+    }
+
+    // --- MASTER (solo una vez) ---
+    function buildMasterOnce() {
+      if (STATE.masterSlides.length) return;
+
+      ensureStash();
+      STATE.root = document.querySelector(SLIDER_SEL);
+
+      // 1) capturar TODOS los slides “crudos”
+      var initialSlides = Array.from(document.querySelectorAll(SLIDE_SEL));
+
+      // 2) poblar masterSlides + masterOrder + groupsMaster
+      STATE.masterSlides = initialSlides.slice();
+      STATE.masterOrder.clear();
+      STATE.groupsMaster.global = [];
+      STATE.groupsMaster.byVariant = {};
+
+      STATE.masterSlides.forEach(function (el, i) {
+        STATE.masterOrder.set(el, i);
+        var isGlobal =
+          el.classList.contains('is-multimedia') ||
+          el.getAttribute('data-scope') === 'multimedia' ||
+          !el.hasAttribute('data-variant');
+        if (isGlobal) STATE.groupsMaster.global.push(el);
+        else {
+          var vid = String(el.getAttribute('data-variant'));
+          (STATE.groupsMaster.byVariant[vid] || (STATE.groupsMaster.byVariant[vid] = [])).push(el);
         }
-        log('[VG] sniffFlickity: NOT found. class=', root.className, 'vp?', !!vp);
-        return null;
-      }
-      function getFlickity() {
-        log('[VG] getFlickity: enter');
-        var root = document.querySelector(SLIDER_SEL);
-        var inst = sniffFlickity(root);
-        log('[VG] getFlickity: found?', !!inst);
-        return inst;
-      }
+      });
 
-      // --- MASTER (solo una vez) ---
-      function buildMasterOnce() {
-        if (STATE.masterSlides.length) {
-          log('[VG] buildMasterOnce: already built');
-          return;
+      // 3) AHORA sí: mapear media-id -> índice del slide
+      STATE.mediaIdToSlideIndex.clear();
+      STATE.masterSlides.forEach(function (el) {
+        var mid = el.getAttribute('data-media-id');
+        if (mid != null) STATE.mediaIdToSlideIndex.set(mid, STATE.masterOrder.get(el));
+      });
+
+      // 4) construir el “master” de THUMBS
+      var allThumbs = Array.from(document.querySelectorAll(THUMBS_SEL));
+      STATE.masterThumbs = allThumbs.slice();
+      STATE.masterThumbOrder.clear();
+      STATE.groupsThumbMaster.global = [];
+      STATE.groupsThumbMaster.byVariant = {};
+
+      STATE.masterThumbs.forEach(function (el, i) {
+        STATE.masterThumbOrder.set(el, i);
+        var v = el.getAttribute('data-variant');
+        var isGlobal = !el.hasAttribute('data-variant') || v === '' || v == null;
+        if (isGlobal) STATE.groupsThumbMaster.global.push(el);
+        else {
+          v = String(v);
+          (STATE.groupsThumbMaster.byVariant[v] || (STATE.groupsThumbMaster.byVariant[v] = [])).push(el);
         }
+      });
+    }
 
-        log('[VG] buildMasterOnce: building…');
-        var stash = ensureStash();
-        STATE.root = document.querySelector(SLIDER_SEL);
+    function desiredFromMaster(vid) {
+      var want = [].concat(STATE.groupsMaster.global, STATE.groupsMaster.byVariant[vid] || []);
+      want.sort(function (a, b) {
+        return STATE.masterOrder.get(a) - STATE.masterOrder.get(b);
+      });
+      return want;
+    }
 
-        // Toma TODOS los slides que existan actualmente en el carrusel
-        var initialSlides = Array.from(document.querySelectorAll(SLIDE_SEL));
+    function desiredThumbsFromMaster(vid) {
+      // globales + thumbs de la variante
+      var want = [].concat(STATE.groupsThumbMaster.global, STATE.groupsThumbMaster.byVariant[vid] || []);
+      // ordenar por el orden de su slide “par”
+      want.sort(function (a, b) {
+        var ai = STATE.mediaIdToSlideIndex.get(mediaIdOf(a)) ?? 99999;
+        var bi = STATE.mediaIdToSlideIndex.get(mediaIdOf(b)) ?? 99999;
+        return ai - bi;
+      });
+      return want;
+    }
 
-        STATE.masterSlides = initialSlides.slice(); // copia
-        STATE.masterOrder.clear();
-        STATE.groupsMaster.global = [];
-        STATE.groupsMaster.byVariant = {};
-
-        STATE.masterSlides.forEach(function (el, i) {
-          STATE.masterOrder.set(el, i);
-          var isGlobal =
-            el.classList.contains('is-multimedia') ||
-            el.getAttribute('data-scope') === 'multimedia' ||
-            !el.hasAttribute('data-variant');
-          if (isGlobal) STATE.groupsMaster.global.push(el);
-          else {
-            var vid = String(el.getAttribute('data-variant'));
-            (STATE.groupsMaster.byVariant[vid] || (STATE.groupsMaster.byVariant[vid] = [])).push(el);
-          }
+    // --- Ayudas de lectura ---
+    function currentCells() {
+      if (STATE.flkty && STATE.flkty.cells) {
+        var els = STATE.flkty.cells.map(function (c) {
+          return c.element;
         });
-
-        log(
-          '[VG] MASTER:',
-          '\n  total=',
-          STATE.masterSlides.length,
-          '\n  global=',
-          STATE.groupsMaster.global.length,
-          '\n  variants=',
-          Object.keys(STATE.groupsMaster.byVariant)
-            .map(function (k) {
-              return k + ':' + STATE.groupsMaster.byVariant[k].length;
-            })
-            .join(', ')
-        );
+        return els;
       }
+      var vis = Array.from(document.querySelectorAll(SLIDE_SEL)).filter(function (el) {
+        return el.style.display !== 'none';
+      });
+      return vis;
+    }
 
-      function desiredFromMaster(vid) {
-        var want = [].concat(STATE.groupsMaster.global, STATE.groupsMaster.byVariant[vid] || []);
-        want.sort(function (a, b) {
-          return STATE.masterOrder.get(a) - STATE.masterOrder.get(b);
-        });
-        log('[VG] desiredFromMaster len=', want.length, 'ids=', want.map(idOf));
-        return want;
-      }
+    // --- Fallback DOM (sin Flickity) ---
+    function domToggle(vid) {
+      // Asegura que lo visible exista en el DOM principal (saca del stash lo necesario)
+      var root = document.querySelector(SLIDER_SEL + ' .flickity-slider') || document.querySelector(SLIDER_SEL);
+      var stash = ensureStash();
+      var want = desiredFromMaster(vid);
 
-      // --- Ayudas de lectura ---
-      function currentCells() {
-        if (STATE.flkty && STATE.flkty.cells) {
-          var els = STATE.flkty.cells.map(function (c) {
-            return c.element;
-          });
-          log('[VG] currentCells: Flickity=', els.length, els.map(idOf));
-          return els;
+      // Mueve todo lo que deba estar visible desde el stash al root (si no está ya)
+      want.forEach(function (el) {
+        if (!root.contains(el)) {
+          stash.contains(el) && root.appendChild(el);
         }
-        var vis = Array.from(document.querySelectorAll(SLIDE_SEL)).filter(function (el) {
-          return el.style.display !== 'none';
-        });
-        log('[VG] currentCells: DOM visible=', vis.length, vis.map(idOf));
-        return vis;
+      });
+
+      // Oculta los no deseados (moverlos al stash)
+      var allNow = Array.from(root.querySelectorAll('.product-images__slide'));
+      var toHide = allNow.filter(function (el) {
+        return want.indexOf(el) === -1;
+      });
+      toHide.forEach(function (el) {
+        stash.appendChild(el);
+      });
+
+      // Asegura visibilidad de los “want”
+      want.forEach(function (el) {
+        el.style.display = '';
+        el.tabIndex = 0;
+        el.setAttribute('aria-hidden', 'false');
+      });
+    }
+
+    // --- Sincronización con Flickity usando STASH ---
+    function syncFlickityTo(vid) {
+      var flkty = STATE.flkty;
+      var root = document.querySelector(SLIDER_SEL + ' .flickity-slider');
+      var stash = ensureStash();
+      if (!flkty || !root) {
+        domToggle(vid);
+        return;
       }
 
-      // --- Fallback DOM (sin Flickity) ---
-      function domToggle(vid) {
-        log('[VG] domToggle: enter vid=', vid);
-        // Asegura que lo visible exista en el DOM principal (saca del stash lo necesario)
-        var root = document.querySelector(SLIDER_SEL + ' .flickity-slider') || document.querySelector(SLIDER_SEL);
-        var stash = ensureStash();
-        var want = desiredFromMaster(vid);
+      var want = desiredFromMaster(vid);
+      var have = currentCells();
+      var wantSet = new Set(want);
+      var haveSet = new Set(have);
 
-        // Mueve todo lo que deba estar visible desde el stash al root (si no está ya)
-        want.forEach(function (el) {
-          if (!root.contains(el)) {
-            stash.contains(el) && root.appendChild(el);
-          }
-        });
-
-        // Oculta los no deseados (moverlos al stash)
-        var allNow = Array.from(root.querySelectorAll('.product-images__slide'));
-        var toHide = allNow.filter(function (el) {
-          return want.indexOf(el) === -1;
-        });
-        toHide.forEach(function (el) {
+      // 1) Quitar sobrantes del carrusel y moverlos al stash (NO se pierden)
+      var toRemove = have.filter(function (el) {
+        return !wantSet.has(el);
+      });
+      if (toRemove.length) {
+        try {
+          flkty.remove(toRemove);
+        } catch (e) {
+          console.warn('[VG] flkty.remove error', e);
+        }
+        toRemove.forEach(function (el) {
           stash.appendChild(el);
         });
-
-        // Asegura visibilidad de los “want”
-        want.forEach(function (el) {
-          el.style.display = '';
-          el.tabIndex = 0;
-          el.setAttribute('aria-hidden', 'false');
-        });
-
-        log('[VG] domToggle: shown=', want.length, 'hidden moved to stash=', toHide.length);
       }
 
-      // --- Sincronización con Flickity usando STASH ---
-      function syncFlickityTo(vid) {
-        log('[VG] syncFlickityTo: enter vid=', vid);
-        var flkty = STATE.flkty;
-        var root = document.querySelector(SLIDER_SEL + ' .flickity-slider');
-        var stash = ensureStash();
-        if (!flkty || !root) {
-          log('[VG] syncFlickityTo: NO flkty/root -> domToggle');
-          domToggle(vid);
-          return;
-        }
-
-        var want = desiredFromMaster(vid);
-        var have = currentCells();
-        var wantSet = new Set(want);
-        var haveSet = new Set(have);
-
-        // 1) Quitar sobrantes del carrusel y moverlos al stash (NO se pierden)
-        var toRemove = have.filter(function (el) {
-          return !wantSet.has(el);
-        });
-        if (toRemove.length) {
-          log('[VG] remove -> stash:', toRemove.length, toRemove.map(idOf));
-          try {
-            flkty.remove(toRemove);
-          } catch (e) {
-            console.warn('[VG] flkty.remove error', e);
-          }
-          toRemove.forEach(function (el) {
-            stash.appendChild(el);
-          });
-        } else {
-          log('[VG] remove: nothing to remove');
-        }
-
-        // 2) Insertar faltantes desde el stash en el orden correcto
-        have = currentCells();
-        haveSet = new Set(have);
-        var inserted = [];
-        want.forEach(function (el, idx) {
-          if (!haveSet.has(el)) {
-            // viene del stash (o nunca estuvo)
-            if (stash.contains(el)) {
-              // insertar en índice exacto si es posible
-              var insertIndex = idx;
-              if (idx > 0) {
-                var beforeEl = want[idx - 1];
-                var pos = have.indexOf(beforeEl);
-                insertIndex = pos >= 0 ? pos + 1 : have.length;
-              }
-              log('[VG] insert from stash:', idOf(el), 'at', insertIndex);
-              try {
-                flkty.insert(el, insertIndex);
-              } catch (e1) {
-                try {
-                  flkty.append(el);
-                } catch (e2) {
-                  console.warn('[VG] insert/append error', e1, e2);
-                }
-              }
-              inserted.push(idOf(el));
-              have = currentCells();
-              haveSet = new Set(have);
-            } else {
-              // Si por alguna razón no está en stash ni en have, intenta append
-              log('[VG] insert (not in stash!?):', idOf(el));
-              try {
-                flkty.insert(el, idx);
-              } catch (e3) {
-                try {
-                  flkty.append(el);
-                } catch (e4) {}
-              }
-              have = currentCells();
-              haveSet = new Set(have);
+      // 2) Insertar faltantes desde el stash en el orden correcto
+      have = currentCells();
+      haveSet = new Set(have);
+      var inserted = [];
+      want.forEach(function (el, idx) {
+        if (!haveSet.has(el)) {
+          // viene del stash (o nunca estuvo)
+          if (stash.contains(el)) {
+            // insertar en índice exacto si es posible
+            var insertIndex = idx;
+            if (idx > 0) {
+              var beforeEl = want[idx - 1];
+              var pos = have.indexOf(beforeEl);
+              insertIndex = pos >= 0 ? pos + 1 : have.length;
             }
+            try {
+              flkty.insert(el, insertIndex);
+            } catch (e1) {
+              try {
+                flkty.append(el);
+              } catch (e2) {
+                console.warn('[VG] insert/append error', e1, e2);
+              }
+            }
+            inserted.push(idOf(el));
+            have = currentCells();
+            haveSet = new Set(have);
+          } else {
+            try {
+              flkty.insert(el, idx);
+            } catch (e3) {
+              try {
+                flkty.append(el);
+              } catch (e4) {}
+            }
+            have = currentCells();
+            haveSet = new Set(have);
           }
-        });
-        if (!inserted.length) log('[VG] insert: nothing inserted');
-
-        // 3) Recalcular
-        try {
-          flkty.reloadCells();
-        } catch (e) {
-          log('[VG] reloadCells error', e);
         }
+      });
+
+      // 3) Recalcular
+      try {
+        flkty.reloadCells();
+      } catch (e) {}
+      try {
+        flkty.reposition();
+      } catch (e) {}
+      try {
+        flkty.resize();
+      } catch (e) {}
+      try {
+        flkty.select(0, false, true);
+      } catch (e) {}
+
+      requestAnimationFrame(function () {
         try {
           flkty.reposition();
-        } catch (e) {
-          log('[VG] reposition error', e);
-        }
+        } catch (e) {}
         try {
-          flkty.resize();
-        } catch (e) {
-          log('[VG] resize error', e);
+          flkty.positionSlider();
+        } catch (e) {}
+      });
+
+      var finalCells = currentCells();
+    }
+
+    function syncThumbsTo(vid) {
+      var wrap = document.querySelector(THUMBS_WRAPPER);
+      if (!wrap) return;
+      var stash = ensureThumbStash();
+
+      var want = desiredThumbsFromMaster(vid);
+      var have = Array.from(wrap.querySelectorAll(THUMBS_SEL));
+      var wantSet = new Set(want);
+
+      // 1) mover a stash los que no van
+      var toRemove = have.filter(function (el) {
+        return !wantSet.has(el);
+      });
+      toRemove.forEach(function (el) {
+        stash.appendChild(el);
+      });
+
+      // 2) insertar en orden los deseados
+      var cur = Array.from(wrap.querySelectorAll(THUMBS_SEL));
+      var curSet = new Set(cur);
+      want.forEach(function (el, idx) {
+        if (!curSet.has(el)) {
+          // viene del stash
+          var before = want[idx + 1]; // insertarlo antes del siguiente deseado si está
+          if (before && wrap.contains(before)) {
+            wrap.insertBefore(el, before);
+          } else {
+            wrap.appendChild(el);
+          }
+          cur = Array.from(wrap.querySelectorAll(THUMBS_SEL));
+          curSet = new Set(cur);
         }
+      });
+    }
+
+    // Quita la clase a todos y se la pone al thumbnail "correcto"
+    function markInitialSelectedThumb(vid) {
+      var thumbs = Array.from(document.querySelectorAll(THUMBS_SEL));
+      thumbs.forEach(function (t) {
+        t.classList.remove('is-initial-selected');
+      });
+
+      // 1) Preferimos un thumbnail de la variante activa
+      var target = thumbs.find(function (t) {
+        return String(t.getAttribute('data-variant')) === String(vid);
+      });
+
+      // 2) Si no hay (p.ej. variante sin galería extra), toma el primero visible
+      if (!target) {
+        target = thumbs.find(function (t) {
+          return t.style.display !== 'none';
+        });
+      }
+
+      if (target) target.classList.add('is-initial-selected');
+    }
+
+    // Si quieres alinear también el slide “inicial” de Flickity con ese thumb
+    function selectFirstDesiredSlide(vid) {
+      var root = document.querySelector('#Product-Slider');
+      var flkty =
+        root &&
+        (root.flickity ||
+          root.__flkty ||
+          root._flickity ||
+          root.querySelector('.flickity-viewport')?.parentNode?.flickity);
+
+      if (!flkty) return;
+
+      // primer slide visible (tras tus hides/removes)
+      var visibleSlides = Array.from(document.querySelectorAll(SLIDE_SEL)).filter(function (el) {
+        return el.style.display !== 'none';
+      });
+
+      if (visibleSlides.length === 0) return;
+
+      var first = visibleSlides[0];
+      var cellIndex = flkty.cells.findIndex(function (c) {
+        return c.element === first;
+      });
+      if (cellIndex >= 0) {
         try {
-          flkty.select(0, false, true);
-        } catch (e) {
-          log('[VG] select error', e);
-        }
-
-        requestAnimationFrame(function () {
-          try {
-            flkty.reposition();
-          } catch (e) {}
-          try {
-            flkty.positionSlider();
-          } catch (e) {}
-          log('[VG] RAF tick after sync');
-        });
-
-        var finalCells = currentCells();
-        log('[VG] synced: have=', finalCells.length, 'want=', want.length, 'vid=', vid);
+          flkty.select(cellIndex, false, true);
+        } catch (e) {}
       }
+    }
 
-      // Quita la clase a todos y se la pone al thumbnail "correcto"
-      function markInitialSelectedThumb(vid) {
-        var thumbs = Array.from(document.querySelectorAll(THUMBS_SEL));
-        thumbs.forEach(function (t) {
-          t.classList.remove('is-initial-selected');
-        });
+    // --- Thumbs + Toggle principal ---
+    function toggle(vid) {
+      // thumbs primero
+      syncThumbsTo(vid);
 
-        // 1) Preferimos un thumbnail de la variante activa
-        var target = thumbs.find(function (t) {
-          return String(t.getAttribute('data-variant')) === String(vid);
-        });
+      // decidir ruta para slides
+      STATE.flkty = getFlickity();
+      if (!STATE.flkty) domToggle(vid);
+      else syncFlickityTo(vid);
 
-        // 2) Si no hay (p.ej. variante sin galería extra), toma el primero visible
-        if (!target) {
-          target = thumbs.find(function (t) {
-            return t.style.display !== 'none';
-          });
-        }
+      // alinear selección visual
+      markInitialSelectedThumb(vid);
+      selectFirstDesiredSlide(vid);
+    }
 
-        if (target) target.classList.add('is-initial-selected');
+    // --- Esperar a Flickity (event + observer + polling) ---
+    function hookWhenReady() {
+      var root = document.querySelector(SLIDER_SEL);
+      if (!root || STATE.readyHooked) {
+        return;
       }
+      STATE.readyHooked = true;
 
-      // Si quieres alinear también el slide “inicial” de Flickity con ese thumb
-      function selectFirstDesiredSlide(vid) {
-        var root = document.querySelector('#Product-Slider');
-        var flkty =
-          root &&
-          (root.flickity ||
-            root.__flkty ||
-            root._flickity ||
-            root.querySelector('.flickity-viewport')?.parentNode?.flickity);
+      root.addEventListener(
+        'ready.flickity',
+        function () {
+          toggle(getVariantId());
+        },
+        { once: true }
+      );
 
-        if (!flkty) return;
-
-        // primer slide visible (tras tus hides/removes)
-        var visibleSlides = Array.from(document.querySelectorAll(SLIDE_SEL)).filter(function (el) {
-          return el.style.display !== 'none';
-        });
-
-        if (visibleSlides.length === 0) return;
-
-        var first = visibleSlides[0];
-        var cellIndex = flkty.cells.findIndex(function (c) {
-          return c.element === first;
-        });
-        if (cellIndex >= 0) {
-          try {
-            flkty.select(cellIndex, false, true);
-          } catch (e) {}
+      STATE.observer = new MutationObserver(function () {
+        var enabled = root.classList.contains('flickity-enabled') || root.querySelector('.flickity-viewport');
+        if (enabled) {
+          STATE.observer && STATE.observer.disconnect();
+          toggle(getVariantId());
         }
-      }
+      });
+      STATE.observer.observe(root, { attributes: true, childList: true, subtree: true });
 
-      // --- Thumbs + Toggle principal ---
-      function toggle(vid) {
-        log('[VG] toggle: enter vid=', vid);
-
-        // thumbs
-        var thumbs = document.querySelectorAll(THUMBS_SEL);
-        var t = { shown: 0, hidden: 0 };
-        thumbs.forEach(function (n) {
-          var v = n.getAttribute('data-variant');
-          var show = v ? String(v) === String(vid) : true;
-          n.style.display = show ? '' : 'none';
-          show ? t.shown++ : t.hidden++;
-        });
-        log('[VG] thumbs shown/hidden:', t);
-
-        // decidir ruta
+      // Poll de seguridad
+      STATE.pollDeadline = Date.now() + 6000;
+      if (STATE.pollTimer) clearInterval(STATE.pollTimer);
+      STATE.pollTimer = setInterval(function () {
         STATE.flkty = getFlickity();
-        if (!STATE.flkty) {
-          log('[VG] toggle: path=DOM');
-          domToggle(vid);
-        } else {
-          log('[VG] toggle: path=Flickity');
-          syncFlickityTo(vid);
+        if (STATE.flkty) {
+          clearInterval(STATE.pollTimer);
+
+          toggle(getVariantId());
+        } else if (Date.now() > STATE.pollDeadline) {
+          clearInterval(STATE.pollTimer);
         }
-        markInitialSelectedThumb(vid);
-  selectFirstDesiredSlide(vid); // opcional si ya estás haciendo select(0)
-      }
+      }, 200);
+    }
 
-      // --- Esperar a Flickity (event + observer + polling) ---
-      function hookWhenReady() {
-        log('[VG] hookWhenReady: enter');
-        var root = document.querySelector(SLIDER_SEL);
-        if (!root || STATE.readyHooked) {
-          log('[VG] hookWhenReady: skip');
-          return;
-        }
-        STATE.readyHooked = true;
+    // --- Wire ---
+    function wire() {
+      ensureStash();
+      buildMasterOnce();
 
-        root.addEventListener(
-          'ready.flickity',
-          function () {
-            log('[VG] ready.flickity (event)');
-            toggle(getVariantId());
-          },
-          { once: true }
-        );
+      var initVid = getVariantId();
 
-        STATE.observer = new MutationObserver(function () {
-          var enabled = root.classList.contains('flickity-enabled') || root.querySelector('.flickity-viewport');
-          if (enabled) {
-            log('[VG] MutationObserver: flickity-enabled detectado');
-            STATE.observer && STATE.observer.disconnect();
-            toggle(getVariantId());
-          }
-        });
-        STATE.observer.observe(root, { attributes: true, childList: true, subtree: true });
+      // Primera pasada coherente para AMBOS
+      syncThumbsTo(initVid);
+      markInitialSelectedThumb(initVid);
+      domToggle(initVid);
 
-        // Poll de seguridad
-        STATE.pollDeadline = Date.now() + 6000;
-        if (STATE.pollTimer) clearInterval(STATE.pollTimer);
-        STATE.pollTimer = setInterval(function () {
-          STATE.flkty = getFlickity();
-          if (STATE.flkty) {
-            clearInterval(STATE.pollTimer);
-            log('[VG] poll: flkty FOUND -> toggle');
-            toggle(getVariantId());
-          } else if (Date.now() > STATE.pollDeadline) {
-            clearInterval(STATE.pollTimer);
-            log('[VG] poll: flkty NOT found (stay DOM)');
-          }
-        }, 200);
-      }
+      // Esperar a Flickity
+      hookWhenReady();
 
-      // --- Wire ---
-      function wire() {
-        log('[VG] wire: enter');
-        ensureStash();
-        buildMasterOnce();
+      // Listeners
+      document.addEventListener('change', function (e) {
+        if (e.target && e.target.name === 'id') {
+          var v = String(e.target.value);
 
-        var initVid = getVariantId();
-        log('[VG] init variant:', initVid);
-
-        // Primera pasada DOM (para que no se vea todo mezclado)
-        domToggle(initVid);
-        // Y quedar a la espera de Flickity para ir a modo carrusel
-        hookWhenReady();
-
-        // Listeners
-        document.addEventListener('change', function (e) {
-          if (e.target && e.target.name === 'id') {
-            var v = String(e.target.value);
-            log('[VG] change ->', v);
-            toggle(v);
-          }
-        });
-        document.addEventListener('product:variant-change', function (e) {
-          var id = e?.detail?.variant?.id;
-          log('[VG] product:variant-change event:', id);
-          if (id) toggle(String(id));
-        });
-        document.addEventListener('variant:change', function (e) {
-          var id = e?.detail?.id || e?.detail?.variant?.id;
-          log('[VG] variant:change event:', id);
-          if (id) toggle(String(id));
-        });
-        window.addEventListener('popstate', function () {
-          var v = getVariantId();
-          log('[VG] popstate ->', v);
           toggle(v);
-        });
-      }
+        }
+      });
+      document.addEventListener('product:variant-change', function (e) {
+        var id = e?.detail?.variant?.id;
 
-      // ======= Integra con tu flujo existente =======
-      // En tu función toggle(vid), al final:
-      // markInitialSelectedThumb(vid);
-      // selectFirstDesiredSlide(vid);
+        if (id) toggle(String(id));
+      });
+      document.addEventListener('variant:change', function (e) {
+        var id = e?.detail?.id || e?.detail?.variant?.id;
 
-      // Ejemplo mínimo de integración:
-      {% comment %} window.__variantUIHelpers = {
-        markInitialSelectedThumb: markInitialSelectedThumb,
-        selectFirstDesiredSlide: selectFirstDesiredSlide,
-      }; {% endcomment %}
+        if (id) toggle(String(id));
+      });
+      window.addEventListener('popstate', function () {
+        var v = getVariantId();
 
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () {
-          setTimeout(wire, 0);
-        });
-      } else {
+        toggle(v);
+      });
+    }
+
+    // ======= Integra con tu flujo existente =======
+    // En tu función toggle(vid), al final:
+    // markInitialSelectedThumb(vid);
+    // selectFirstDesiredSlide(vid);
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () {
         setTimeout(wire, 0);
-      }
-    })();
+      });
+    } else {
+      setTimeout(wire, 0);
+    }
+  })();
 </script>
 
 {% schema %}
