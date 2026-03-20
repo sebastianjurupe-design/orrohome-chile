@@ -188,6 +188,7 @@
                         | append: forloop.index0
                       -%}
                       <div
+                        id="Thumb-{{ extra_id }}"
                         class="product-thumbnail"
                         data-media-type="image"
                         data-media-id="{{ extra_id }}"
@@ -461,6 +462,8 @@
         typeof x.resize === 'function'
       );
     }
+
+    // Función sniffFlickity
     function sniffFlickity(root) {
       if (!root) return null;
 
@@ -496,10 +499,45 @@
 
       return null;
     }
+
+    //Función getFlickity
     function getFlickity() {
-      var root = document.querySelector(SLIDER_SEL);
-      var inst = sniffFlickity(root);
-      return inst;
+      var root = document.querySelector('#Product-Slider');
+      var vp = root && root.querySelector('.flickity-viewport');
+      return (
+        (root && (root.flickity || root.__flkty || root._flickity)) ||
+        (vp && vp.parentNode && vp.parentNode.flickity) ||
+        null
+      );
+    }
+
+    // --- selección segura por data-media-id (no por índice) ---
+    function selectByMediaId(mid) {
+      var flkty = getFlickity();
+      if (flkty && flkty.cells) {
+        try {
+          flkty.reloadCells();
+        } catch (e) {}
+        try {
+          flkty.reposition();
+        } catch (e) {}
+        var idx = flkty.cells.findIndex(function (c) {
+          return c.element.getAttribute('data-media-id') === mid;
+        });
+        if (idx >= 0) {
+          try {
+            flkty.select(idx, false, true);
+          } catch (e) {}
+          return true;
+        }
+      }
+      // fallback sin Flickity
+      var el = document.querySelector('#Product-Slider .product-images__slide[data-media-id="' + mid + '"]');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        return true;
+      }
+      return false;
     }
 
     // --- MASTER (solo una vez) ---
@@ -901,10 +939,30 @@
       });
     }
 
-    // ======= Integra con tu flujo existente =======
-    // En tu función toggle(vid), al final:
-    // markInitialSelectedThumb(vid);
-    // selectFirstDesiredSlide(vid);
+    // --- intercepta el clic en thumbs y evita doble clic ---
+    document.addEventListener(
+      'click',
+      function (e) {
+        var thumb = e.target.closest('#Product-Thumbnails .product-thumbnail');
+        if (!thumb) return;
+
+        var mid = thumb.getAttribute('data-media-id');
+        if (!mid) return;
+
+        // frenamos el handler del theme
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+
+        // Esperamos a que el reordenado/insert de Flickity quede estable y luego seleccionamos por media-id
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            selectByMediaId(mid);
+          });
+        });
+      },
+      true
+    ); // <-- usar captura para adelantarnos al listener del theme
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () {

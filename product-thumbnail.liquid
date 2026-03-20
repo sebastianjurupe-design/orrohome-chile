@@ -1,79 +1,442 @@
-{%- liquid
-  assign image_set = false
-  assign image_set_group = ''
-  if media.alt contains '#'
-    assign image_set_full = media.alt | split: '#' | last
-    if image_set_full contains '_'
-      assign image_set = true
-      assign image_set_group = image_set_full | split: '_' | first
-    endif
-  endif
-
-  assign is_active = false
-  assign is_selected = false
-  if product.selected_or_first_available_variant.featured_media == null and forloop.index == 1
-    assign is_active = true
-    assign is_selected = true
-  elsif product.selected_or_first_available_variant.featured_media.id == media.id
-    assign is_active = true
-    assign is_selected = true
-  elsif variant_images contains media.src and product.selected_or_first_available_variant.featured_media.id != media.id
-    assign is_active = false
-  endif
-
-  unless variant_images contains media.src
-    assign is_active = true
-  endunless
-
-  unless hide_variants
-    assign is_active = true
-  endunless
-
-  assign sizes = '160x160'
-  if media_aspect_ratio == 'adapt'
-    assign sizes = '160x0'
-  elsif media_aspect_ratio == 'portrait'
-    assign sizes = '160x200'
-  elsif media_aspect_ratio == 'landscape'
-    assign sizes = '160x95'
-  endif
--%}
-
-{%- liquid
-  assign pt_variant_id = data_variant
-
-  if pt_variant_id == blank
-    for vv in product.variants
-      if vv.featured_media and vv.featured_media.id == media.id
-        assign pt_variant_id = vv.id
-        break
-      endif
-    endfor
-  endif
--%}
-
-<div
-  id="Thumb-{{ section.id }}-{{ media.id }}"
-  class="product-thumbnail{% if is_active %} is-active{% endif %}{% if variant_images contains media.src %} product-images__slide-item--variant{% endif %}{% if is_selected %} is-initial-selected{% endif %}"
-  {% if image_set %}
-    data-set-name="{{ image_set_group }}"
-    data-group="{{ image_set_full }}"
-  {% endif %}
-  {% if pt_variant_id %}
-    data-variant="{{ pt_variant_id }}"
+{% if product %}
+  {% if product.selected_or_first_available_variant %}
+    {% assign current_price = product.selected_or_first_available_variant.price %}
   {% else %}
-    data-scope="multimedia"
+    {% assign current_price = product.price %}
   {% endif %}
->
-  {%- if media.media_type == 'model' -%}
-    <div class="product-thumbnail-icon">
-      {% render 'svg-icons' with 'thb-icon-3d-model' %}
+
+  {% assign discounted_price = current_price | times: 0.90 %}
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap');
+
+    .cyber-mobile-banner-official-red {
+      display: none !important;
+      background: linear-gradient(135deg, #f40009, #ff1a1a, #e60000, #f40009);
+      background-size: 300% 300%;
+      border-radius: 14px;
+      font-family: 'Nunito', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      margin-bottom: -10px;
+      margin-top: -5px;
+      color: #fff;
+      position: relative;
+      overflow: hidden;
+      animation: cyber-mobile-gradient-shift-red 4s ease infinite;
+      will-change: transform;
+      border: none;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .cyber-mobile-banner-official-red-badge {
+      padding: 12px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-width: 68px;
+      text-align: center;
+      flex-shrink: 0;
+      border-right: 2px dashed rgba(255, 255, 255, 0.5);
+    }
+
+    .cyber-mobile-banner-official-red-percent {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-mobile-banner-official-red-off {
+      background: transparent;
+      color: white;
+      font-size: 24px;
+      font-weight: 800;
+      padding: 1px 8px;
+      border-radius: 9999px;
+      margin-top: 3px;
+      display: block;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-mobile-banner-official-red-content {
+      flex: 1;
+      padding: 10px 15px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 5px;
+    }
+
+    .cyber-mobile-banner-official-red-row-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .cyber-mobile-banner-official-red-row-bottom {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .cyber-mobile-banner-official-red-label {
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+      opacity: 1;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-mobile-banner-official-red-price-line {
+      font-size: 15px;
+      font-weight: 400;
+      opacity: 0.95;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-mobile-banner-official-red-price-text {
+      width: 100%;
+      display: block;
+      font-size: 15px !important;
+      font-weight: 800;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-mobile-banner-official-red-cta-line {
+      font-size: 12px;
+      font-weight: 400;
+      opacity: 0.9;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-mobile-banner-official-red-button {
+      margin-top: 0 !important;
+      background-color: #ffffff !important;
+      color: #f40009 !important;
+      padding: 4px 7px !important;
+      border-radius: 9999px !important;
+      font-weight: 800 !important;
+      font-size: 11px !important;
+      display: inline-block !important;
+      white-space: nowrap !important;
+      font-family: 'Nunito', sans-serif !important;
+      animation: cyber-mobile-subtle-pulse-red 3s ease-in-out infinite !important;
+      text-decoration: none;
+      text-transform: uppercase;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+      pointer-events: none;
+    }
+
+    @keyframes cyber-mobile-gradient-shift-red {
+      0% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+
+    @keyframes cyber-mobile-subtle-pulse-red {
+      0%,
+      100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.02);
+      }
+    }
+
+    @media screen and (max-width: 768px) {
+      .cyber-mobile-banner-official-red {
+        display: flex !important;
+      }
+    }
+
+    @media screen and (min-width: 769px) {
+      .cyber-mobile-banner-official-red {
+        display: none !important;
+      }
+    }
+
+    .cyber-mobile-banner-official-red:active {
+      transform: scale(0.98);
+      transition: transform 0.1s ease;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .cyber-mobile-banner-official-red,
+      .cyber-mobile-banner-official-red-button {
+        animation: none !important;
+      }
+    }
+  </style>
+
+  <button
+    type="button"
+    class="cyber-mobile-banner-official-red"
+    onclick="openMailerLitePopupMobile()"
+    aria-label="Obtener 10% de descuento y envío gratis. Precio: {{ discounted_price | money_without_trailing_zeros }}"
+  >
+    <div class="cyber-mobile-banner-official-red-badge">
+      <span class="cyber-mobile-banner-official-red-percent">10%</span>
+      <span class="cyber-mobile-banner-official-red-off">OFF</span>
     </div>
-  {%- endif -%}
-  {%- if media.media_type == 'video' or media.media_type == 'external_video' -%}
-    <div class="product-thumbnail-icon">
-      {% render 'svg-icons' with 'thb-icon-play' %}
+
+    <div class="cyber-mobile-banner-official-red-content">
+      <div class="cyber-mobile-banner-official-red-row-top">
+        <div class="cyber-mobile-banner-official-red-label">Llévatelo por solo</div>
+        <div class="cyber-mobile-banner-official-red-price-line">
+          <span class="cyber-mobile-banner-official-red-price-text discounted-price-display-mobile-red">
+            {{ discounted_price | money_without_trailing_zeros }}
+          </span>
+        </div>
+      </div>
+
+      <div class="cyber-mobile-banner-official-red-row-bottom">
+        <div class="cyber-mobile-banner-official-red-label">y envío gratis* haciendo click</div>
+        <div class="cyber-mobile-banner-official-red-cta-line">
+          <span><s class="cyber-mobile-banner-official-red-button">Aquí</s></span>
+        </div>
+      </div>
     </div>
-  {%- endif -%}
-  {%- render 'responsive-image', image: media.preview_image, sizes: sizes -%}
-</div>
+  </button>
+
+  <script>
+    (function() {
+      const productData = {{ product | json }};
+      let updateTimeoutMobileRed;
+
+      function formatDiscountedPrice(priceInCents) {
+        const discountedPrice = priceInCents * 0.90;
+
+        if (typeof Shopify !== 'undefined' && Shopify.formatMoney) {
+          return Shopify.formatMoney(discountedPrice, {{ shop.money_format | json }});
+        }
+
+        return 'S/. ' + (discountedPrice / 100).toFixed(2).replace(/\.00$/, '');
+      }
+
+      function getCurrentVariantMobileRed() {
+        const variantSelector = document.querySelector('select[name="id"]');
+        if (variantSelector && variantSelector.value) {
+          const selectedVariant = productData.variants.find(function(v) {
+            return v.id == variantSelector.value;
+          });
+          if (selectedVariant) return selectedVariant;
+        }
+
+        const checkedRadio = document.querySelector('input[name="id"]:checked');
+        if (checkedRadio && checkedRadio.value) {
+          const selectedVariant = productData.variants.find(function(v) {
+            return v.id == checkedRadio.value;
+          });
+          if (selectedVariant) return selectedVariant;
+        }
+
+        let selectedOptions = {};
+
+        if (productData.options && productData.options.length) {
+          productData.options.forEach(function(option, index) {
+            const optionInput = document.querySelector(
+              'input[name="' + option.name + '"]:checked, select[name="' + option.name + '"]'
+            );
+
+            if (optionInput) {
+              selectedOptions['option' + (index + 1)] = optionInput.value;
+            }
+          });
+        }
+
+        if (Object.keys(selectedOptions).length > 0) {
+          const matchingVariant = productData.variants.find(function(variant) {
+            let matches = true;
+
+            for (let key in selectedOptions) {
+              if (variant[key] !== selectedOptions[key]) {
+                matches = false;
+                break;
+              }
+            }
+
+            return matches;
+          });
+
+          if (matchingVariant) return matchingVariant;
+        }
+
+        const colorInput = document.querySelector('input[name="Color"]:checked, input[name="color"]:checked');
+        const capacityInput = document.querySelector(
+          'input[name="Capacidad"]:checked, input[name="capacidad"]:checked, select[name="Capacidad"], select[name="capacidad"]'
+        );
+
+        if (colorInput || capacityInput) {
+          const selectedColor = colorInput ? colorInput.value : null;
+          const selectedCapacity = capacityInput ? capacityInput.value : null;
+
+          const matchingVariant = productData.variants.find(function(v) {
+            if (selectedColor && selectedCapacity) {
+              return v.option1 === selectedColor && v.option2 === selectedCapacity;
+            } else if (selectedColor) {
+              return v.option1 === selectedColor;
+            } else if (selectedCapacity) {
+              return v.option2 === selectedCapacity || v.option1 === selectedCapacity;
+            }
+            return false;
+          });
+
+          if (matchingVariant) return matchingVariant;
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const variantIdFromUrl = urlParams.get('variant');
+        if (variantIdFromUrl) {
+          const urlVariant = productData.variants.find(function(v) {
+            return v.id == variantIdFromUrl;
+          });
+          if (urlVariant) return urlVariant;
+        }
+
+        return productData.selected_or_first_available_variant || productData.variants[0];
+      }
+
+      function updateDiscountedPriceMobileRed() {
+        clearTimeout(updateTimeoutMobileRed);
+
+        updateTimeoutMobileRed = setTimeout(function() {
+          const selectedVariant = getCurrentVariantMobileRed();
+          if (!selectedVariant) return;
+
+          const formattedPrice = formatDiscountedPrice(selectedVariant.price);
+
+          const priceDisplays = document.querySelectorAll('.discounted-price-display-mobile-red');
+          priceDisplays.forEach(function(display) {
+            display.textContent = formattedPrice;
+          });
+
+          const banner = document.querySelector('.cyber-mobile-banner-official-red');
+          if (banner) {
+            banner.setAttribute(
+              'aria-label',
+              'Obtener 10% de descuento y envío gratis. Precio: ' + formattedPrice
+            );
+          }
+        }, 50);
+      }
+
+      function attachListenersMobileRed() {
+        const allInputs = document.querySelectorAll(
+          'input[name="Color"], input[name="color"], ' +
+          'input[name="Capacidad"], input[name="capacidad"], ' +
+          'select[name="Capacidad"], select[name="capacidad"], ' +
+          'input[name="id"], select[name="id"], ' +
+          'input[type="radio"], select, button[data-variant-id], .variant-input, .product-form__input'
+        );
+
+        allInputs.forEach(function(input) {
+          input.removeEventListener('change', updateDiscountedPriceMobileRed);
+          input.removeEventListener('click', updateDiscountedPriceMobileRed);
+          input.addEventListener('change', updateDiscountedPriceMobileRed);
+          input.addEventListener('click', updateDiscountedPriceMobileRed);
+        });
+      }
+
+      document.addEventListener('variant:change', function() {
+        updateDiscountedPriceMobileRed();
+      });
+
+      const observerMobileRed = new MutationObserver(function() {
+        attachListenersMobileRed();
+        updateDiscountedPriceMobileRed();
+      });
+
+      function initMobileRedBanner() {
+        attachListenersMobileRed();
+        updateDiscountedPriceMobileRed();
+
+        observerMobileRed.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'data-variant-id', 'checked', 'selected']
+        });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initMobileRedBanner);
+      } else {
+        initMobileRedBanner();
+      }
+    })();
+
+    function openMailerLitePopupMobile() {
+      let modal = document.createElement("div");
+      modal.style.position = "fixed";
+      modal.style.top = "0";
+      modal.style.left = "0";
+      modal.style.width = "100%";
+      modal.style.height = "100%";
+      modal.style.background = "rgba(0,0,0,0.6)";
+      modal.style.backdropFilter = "blur(5px)";
+      modal.style.zIndex = "99999";
+      modal.style.display = "flex";
+      modal.style.alignItems = "center";
+      modal.style.justifyContent = "center";
+      modal.style.opacity = "0";
+      modal.style.transition = "opacity 0.3s ease";
+
+      let iframe = document.createElement("iframe");
+      iframe.src = "https://preview.mailerlite.io/forms/1670912/165083737470535441/share";
+      iframe.style.width = "400px";
+      iframe.style.height = "430px";
+      iframe.style.maxWidth = "95%";
+      iframe.style.maxHeight = "90%";
+      iframe.style.border = "none";
+      iframe.style.borderRadius = "12px";
+      iframe.style.background = "#fff";
+      iframe.style.boxShadow = "0 8px 24px rgba(0,0,0,0.4)";
+      iframe.style.transform = "scale(0.9)";
+      iframe.style.transition = "transform 0.3s ease";
+
+      let closeBtn = document.createElement("div");
+      closeBtn.innerHTML = "&times;";
+      closeBtn.style.position = "absolute";
+      closeBtn.style.top = "20px";
+      closeBtn.style.right = "30px";
+      closeBtn.style.fontSize = "32px";
+      closeBtn.style.color = "#fff";
+      closeBtn.style.cursor = "pointer";
+      closeBtn.style.fontWeight = "bold";
+      closeBtn.addEventListener("click", function() {
+        document.body.removeChild(modal);
+      });
+
+      setTimeout(function() {
+        modal.style.opacity = "1";
+        iframe.style.transform = "scale(1)";
+      }, 50);
+
+      modal.addEventListener("click", function(e) {
+        if (e.target === modal) {
+          document.body.removeChild(modal);
+        }
+      });
+
+      modal.appendChild(iframe);
+      modal.appendChild(closeBtn);
+      document.body.appendChild(modal);
+    }
+  </script>
+{% endif %}

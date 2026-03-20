@@ -1,167 +1,420 @@
-{%- liquid
-  assign image_set = false
-  assign image_set_group = ''
-  if media.alt contains '#'
-    assign image_set_full = media.alt | split: '#' | last
-    if image_set_full contains '_'
-      assign image_set = true
-      assign image_set_group = image_set_full | split: '_' | first
-    endif
-  endif
-
-  assign is_active = false
-  if product.selected_or_first_available_variant.featured_media == null and forloop.index == 1
-    assign is_active = true
-  elsif product.selected_or_first_available_variant.featured_media.id == media.id
-    assign is_active = true
-  elsif variant_images contains media.src and product.selected_or_first_available_variant.featured_media.id != media.id
-    assign is_active = false
-  endif
-
-  unless variant_images contains media.src
-    assign is_active = true
-  endunless
-
-  unless hide_variants
-    assign is_active = true
-  endunless
--%}
-
-{%- comment -%} Detecta si el media es de variante (metacampo o featured) {%- endcomment -%}
-{%- assign pm_variant_id = data_variant -%}
-{%- comment -%} viene del render del metacampo {%- endcomment -%}
-
-{%- if pm_variant_id == blank and media.attached_to_variant? -%}
-  {%- for vv in product.variants -%}
-    {%- if vv.featured_media and vv.featured_media.id == media.id -%}
-      {%- assign pm_variant_id = vv.id -%}
-      {%- break -%}
-    {%- endif -%}
-  {%- endfor -%}
-{%- endif -%}
-
-{%- comment -%} Marcar multimedia solo si NO hay variante {%- endcomment -%}
-{%- assign pm_is_multimedia = false -%}
-{%- if pm_variant_id == blank -%}
-  {%- assign pm_is_multimedia = true -%}
-{%- endif -%}
-
-<div
-  id="Slide-{{ section.id }}-{{ media.id }}"
-  class="product-images__slide{% if is_active %} is-active{% endif %}{% if variant_images contains media.src or pm_variant_id %} product-images__slide-item--variant{% endif %}{% if pm_is_multimedia %} is-multimedia{% endif %}"
-  data-media-id="{{ section.id }}-{{ media.id }}"
-  {% if pm_variant_id %}
-    data-variant="{{ pm_variant_id }}"
+{% if product %}
+  {% if product.selected_or_first_available_variant %}
+    {% assign current_price = product.selected_or_first_available_variant.price %}
+  {% else %}
+    {% assign current_price = product.price %}
   {% endif %}
-  {% if pm_is_multimedia %}
-    data-scope="multimedia"
-  {% endif %}
-  {% if image_set %}
-    data-set-name="{{ image_set_group }}"
-    data-group="{{ image_set_full }}"
-  {% endif %}
->
-  {%- case media.media_type -%}
-    {% when 'image' %}
-      {%- liquid
-        assign ratio = 1
-        if media_aspect_ratio == 'adapt'
-          assign ratio = media.preview_image.aspect_ratio
-        elsif media_aspect_ratio == 'portrait'
-          assign ratio = 1 | divided_by: 1.25
-        elsif media_aspect_ratio == 'landscape'
-          assign ratio = 1 | divided_by: 0.75
-        endif
 
-        assign alt = media.preview_image.alt | split: '#' | first
-      -%}
-      <div
-        class="product-single__media product-single__media-image aspect-ratio aspect-ratio--{{ media_aspect_ratio }}"
-        id="Media-Thumbnails-{{ section.id }}-{{ media.id }}"
-        style="--padding-bottom: {{ 1 | divided_by: ratio | times: 100 }}%;"
-      >
-        {%- if section.settings.lightbox != blank -%}
-          <a
-            href="{{ media.src | image_url }}"
-            class="product-single__media-zoom"
-            data-msrc="{{- media.src | image_url: width: 20 -}}"
-            data-h="{{ media.height }}"
-            data-w="{{ media.width }}"
-            target="_blank"
-            tabindex="-1"
-            title="Zoom"
-            {% if alt != blank and display_captions %}
-              title="{{ alt | escape }}"
-            {% endif %}
-            data-index="{{ image_index }}"
-          >
-            {%- render 'svg-icons' with 'zoom' -%}
-          </a>
-        {%- endif -%}
-        {%- render 'responsive-image', image: media.preview_image, sizes: sizes, priority: priority -%}
-        {%- if alt != blank and display_captions -%}
-          <span class="figcaption">{{ alt }}</span>
-        {%- endif -%}
-      </div>
-    {% when 'external_video' %}
-      <div
-        class="product-single__media product-single__media-external-video"
-        data-provider="{{ media.host }}"
-        data-media-id="{{ media.id }}"
-        id="Media-Thumbnails-{{ section.id }}-{{ media.id }}"
-        style="--aspect-ratio: {{ media.aspect_ratio }}"
-      >
-        <div class="product-single__media-external-video--play">
-          {%- render 'responsive-image', image: media.preview_image, sizes: sizes -%}
-          <button>{% render 'svg-icons' with 'thb-icon-play' %}</button>
+  {% assign discounted_price = current_price | times: 0.90 %}
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap');
+
+    .cyber-desktop-banner {
+      display: none !important;
+      background: linear-gradient(135deg, #ff6a00, #faae42, #ff8c00, #ff6a00);
+      background-size: 300% 300%;
+      border-radius: 12px;
+      font-family: 'Nunito', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      margin-bottom: 16px;
+      color: #fff;
+      position: relative;
+      overflow: hidden;
+      animation: gradient-shift 4s ease infinite;
+      will-change: transform;
+      border: none;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .cyber-desktop-banner-badge {
+      padding: 12px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      min-width: 68px;
+      text-align: center;
+      flex-shrink: 0;
+      border-right: 2px dashed rgba(255, 255, 255, 0.5);
+    }
+
+    .cyber-desktop-badge-percent {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-desktop-badge-off {
+      background: transparent;
+      color: white;
+      font-size: 24px;
+      font-weight: 800;
+      padding: 1px 8px;
+      border-radius: 9999px;
+      margin-top: -5px;
+      display: block;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-desktop-banner-content {
+      flex: 1;
+      padding: 10px 25px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0px;
+    }
+
+    .cyber-desktop-banner-row-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .cyber-desktop-banner-row-bottom {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: -5px;
+    }
+
+    .cyber-desktop-banner-label {
+      font-size: 15px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-desktop-banner-price-line {
+      font-size: 22px;
+      font-weight: 400;
+      opacity: 0.95;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-desktop-price-text {
+      width: 100%;
+      display: block;
+      font-weight: 800;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cyber-desktop-banner-cta-line {
+      font-size: 20px;
+      font-weight: 400;
+      opacity: 0.9;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-family: 'Nunito', sans-serif;
+    }
+
+    .cta-button {
+      margin-top: 0 !important;
+      background-color: #ffffff !important;
+      color: #c75500 !important;
+      padding: 4px 10px !important;
+      border-radius: 9999px !important;
+      font-weight: 800 !important;
+      font-size: 13px !important;
+      display: inline-block !important;
+      white-space: nowrap !important;
+      font-family: 'Nunito', sans-serif !important;
+      animation: subtle-pulse 3s ease-in-out infinite !important;
+      text-decoration: none;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    @keyframes gradient-shift {
+      0% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+
+    @keyframes subtle-pulse {
+      0%,
+      100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.02);
+      }
+    }
+
+    @media screen and (min-width: 769px) {
+      .cyber-desktop-banner {
+        display: flex !important;
+      }
+    }
+
+    .cyber-desktop-banner:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    }
+
+    .cyber-desktop-banner:active {
+      transform: scale(0.98);
+      transition: transform 0.1s ease;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .cyber-desktop-banner,
+      .cta-button {
+        animation: none !important;
+      }
+    }
+  </style>
+
+  <div class="cyber-desktop-banner ml-onclick-form" onclick="ml('show', '7YJwet', true)">
+    <div class="cyber-desktop-banner-badge">
+      <span class="cyber-desktop-badge-percent">10%</span>
+      <span class="cyber-desktop-badge-off">OFF</span>
+    </div>
+
+    <div class="cyber-desktop-banner-content">
+      <div class="cyber-desktop-banner-row-top">
+        <div class="cyber-desktop-banner-label" style="padding-left: 5%;">Llévatelo por solo</div>
+        <div class="cyber-desktop-banner-price-line">
+          <span class="cyber-desktop-price-text discounted-price-display-orange">
+            {{- discounted_price | money_without_trailing_zeros -}}
+          </span>
         </div>
-        {{ media | external_video_tag: loading: 'lazy', loop: section.settings.enable_video_looping, muted: 1 }}
       </div>
-    {% when 'video' %}
-      <div
-        class="product-single__media product-single__media-native-video"
-        data-media-id="{{ media.id }}"
-        style="--aspect-ratio: {{ media.aspect_ratio }}"
-        id="Media-Thumbnails-{{ section.id }}-{{ media.id }}"
-      >
-        {{
-          media
-          | video_tag: controls: true, loading: 'lazy', loop: section.settings.enable_video_looping, image_size: '610x'
-        }}
+
+      <div class="cyber-desktop-banner-row-bottom">
+        <div class="cyber-desktop-banner-label" style="padding-left: 5%;">y envío gratis* CON UN click</div>
+        <div class="cyber-desktop-banner-cta-line">
+          <span><s class="cta-button">Aquí</s></span>
+        </div>
       </div>
-    {% when 'model' %}
-      <product-model
-        class="product-single__media product-single__media-model"
-        style="padding-top: 100%"
-        data-media-id="{{ media.id }}"
-        id="Media-Thumbnails-{{ section.id }}-{{ media.id }}"
-      >
-        <button id="Deferred-Poster-Modal-{{ media.id }}" class="product-single__media-model-button" type="button">
-          {%- render 'svg-icons' with 'thb-icon-3d-model' -%}
-        </button>
-        {%- render 'responsive-image', image: media.preview_image, sizes: sizes -%}
-        <template>
-          {{ media | media_tag: image_size: '2048x', toggleable: true }}
-        </template>
-      </product-model>
-      <button
-        class="product__xr-close product-single__media-xr-close"
-      >
-        {%- render 'svg-icons' with 'close' -%}
-      </button>
-      <button
-        class="button product__xr-button"
-        type="button"
-        data-shopify-xr
-        aria-label="{{ 'products.product.xr_button_label' | t }}"
-        data-shopify-model3d-id="{{ media.id }}"
-        data-shopify-xr-hidden
-        data-shopify-title="{{ product.title | escape }}"
-      >
-        <span>
-          {% render 'svg-icons' with 'thb-icon-3d-model' %}
-          {{ 'products.product.xr_button' | t }}
-        </span>
-      </button>
-  {% endcase %}
-</div>
+    </div>
+  </div>
+
+  <script>
+    if (!window.cyberBannerProductData) {
+      window.cyberBannerProductData = {{ product | json }};
+    }
+
+    if (!window.cyberBannerVariantColors) {
+      window.cyberBannerVariantColors = {};
+      {% for variant in product.variants %}
+        window.cyberBannerVariantColors[{{ variant.id }}] = "{{ variant.metafields.custom.color_referencial.value | default: variant.metafields.custom.color_referencial | escape }}";
+      {% endfor %}
+    }
+
+    (function() {
+      let updateTimeoutOrange;
+
+      function formatPriceOrange(priceInCents) {
+        const price = (priceInCents / 100) * 0.90;
+        return 'S/. ' + price.toFixed(2).replace(/\.00$/, '');
+      }
+
+      function getCurrentVariantOrange() {
+        const productData = window.cyberBannerProductData;
+
+        const variantSelector = document.querySelector('select[name="id"]');
+        if (variantSelector && variantSelector.value) {
+          const selectedVariant = productData.variants.find(v => v.id == variantSelector.value);
+          if (selectedVariant) return selectedVariant;
+        }
+
+        const checkedRadio = document.querySelector('input[name="id"]:checked');
+        if (checkedRadio && checkedRadio.value) {
+          const selectedVariant = productData.variants.find(v => v.id == checkedRadio.value);
+          if (selectedVariant) return selectedVariant;
+        }
+
+        let selectedOptions = {};
+        productData.options.forEach((option, index) => {
+          const optionInput = document.querySelector(`input[name="${option.name}"]:checked, select[name="${option.name}"]`);
+          if (optionInput) selectedOptions[`option${index + 1}`] = optionInput.value;
+        });
+
+        if (Object.keys(selectedOptions).length > 0) {
+          const matchingVariant = productData.variants.find(variant => {
+            let matches = true;
+            for (let key in selectedOptions) {
+              if (variant[key] !== selectedOptions[key]) { matches = false; break; }
+            }
+            return matches;
+          });
+          if (matchingVariant) return matchingVariant;
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const variantIdFromUrl = urlParams.get('variant');
+        if (variantIdFromUrl) {
+          const urlVariant = productData.variants.find(v => v.id == variantIdFromUrl);
+          if (urlVariant) return urlVariant;
+        }
+
+        return productData.variants[0];
+      }
+
+      function normalizeHexColor(hex) {
+        if (!hex) return null;
+        let value = String(hex).trim();
+        if (!value.startsWith('#')) return null;
+        value = value.replace('#', '');
+        if (value.length === 3) value = value.split('').map(c => c + c).join('');
+        if (value.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(value)) return null;
+        return '#' + value.toLowerCase();
+      }
+
+      function adjustHexColor(hex, amount) {
+        const normalized = normalizeHexColor(hex);
+        if (!normalized) return hex;
+        let color = normalized.replace('#', '');
+        let result = '#';
+        for (let i = 0; i < 3; i++) {
+          const channel = parseInt(color.substr(i * 2, 2), 16);
+          result += Math.max(0, Math.min(255, channel + amount)).toString(16).padStart(2, '0');
+        }
+        return result;
+      }
+
+      function buildBannerGradient(color) {
+        if (!color) return '';
+        const cleanColor = String(color).trim();
+        if (cleanColor.includes('gradient(')) return cleanColor;
+        const hex = normalizeHexColor(cleanColor);
+        if (!hex) return cleanColor;
+        return `linear-gradient(135deg, ${adjustHexColor(hex, -22)}, ${adjustHexColor(hex, 28)}, ${adjustHexColor(hex, 10)}, ${adjustHexColor(hex, -22)})`;
+      }
+
+      function updateOrangeBannerPrice() {
+        clearTimeout(updateTimeoutOrange);
+        updateTimeoutOrange = setTimeout(() => {
+          const currentVariant = getCurrentVariantOrange();
+          const currentPrice = currentVariant.price;
+
+          const priceDisplay = document.querySelector('.discounted-price-display-orange');
+          if (priceDisplay) priceDisplay.textContent = formatPriceOrange(currentPrice);
+
+          const banner = document.querySelector('.cyber-desktop-banner');
+          const bannerMobile = document.querySelector('.sj-cyber10-mobile-banner');
+          const ctaButtons = document.querySelectorAll('.cta-button');
+          const starsProduct = document.querySelectorAll('.vstar-star .star-item .trustoo-rating-icon path');
+          const badgeSale = document.querySelector('.thb-product-detail .product-price-container .badge');
+          const bordergarantia = document.querySelector('#warranty-message');
+          const yapePlin = document.querySelector('.shipping-widget .yape-plin-banner');
+
+          if (currentVariant && currentVariant.id) {
+            const metaColor = window.cyberBannerVariantColors[currentVariant.id];
+
+            if (metaColor && metaColor.trim() !== "") {
+              const dynamicBannerBackground = buildBannerGradient(metaColor);
+
+              if (banner) {
+                banner.style.background = dynamicBannerBackground;
+                banner.style.backgroundSize = "300% 300%";
+                banner.style.animation = "gradient-shift 4s ease infinite, subtle-pulse 3s ease-in-out infinite";
+              }
+
+              if (bannerMobile) {
+                bannerMobile.style.background = dynamicBannerBackground;
+                bannerMobile.style.backgroundSize = "300% 300%";
+                bannerMobile.style.animation = "gradient-shift 4s ease infinite, subtle-pulse 3s ease-in-out infinite";
+              }
+
+              if (bordergarantia) {
+                bordergarantia.style.borderColor = metaColor;
+                bordergarantia.style.animation = "subtle-pulse 3s ease-in-out infinite";
+              }
+
+              if (yapePlin) {
+                yapePlin.style.borderColor = metaColor;
+                yapePlin.style.animation = "subtle-pulse 3s ease-in-out infinite";
+              }
+
+              ctaButtons.forEach(button => {
+                button.style.color = metaColor;
+                button.style.animation = "subtle-pulse 3s ease-in-out infinite";
+              });
+
+              starsProduct.forEach(star => {
+                star.style.fill = metaColor;
+                star.style.stroke = metaColor;
+              });
+
+              if (badgeSale) {
+                badgeSale.style.background = metaColor;
+                badgeSale.style.animation = "subtle-pulse 3s ease-in-out infinite";
+              }
+
+            } else {
+              if (banner) {
+                banner.style.background = "";
+                banner.style.backgroundSize = "";
+                banner.style.animation = "";
+              }
+              ctaButtons.forEach(button => {
+                button.style.color = "";
+                button.style.animation = "";
+              });
+              starsProduct.forEach(star => {
+                star.style.fill = "";
+                star.style.stroke = "";
+              });
+            }
+          }
+        }, 50);
+      }
+
+      function attachAllListenersOrange() {
+        const allSelectors = document.querySelectorAll('input[type="radio"], select, button[data-variant-id], .variant-input, .product-form__input');
+        allSelectors.forEach(element => {
+          element.removeEventListener('change', updateOrangeBannerPrice);
+          element.removeEventListener('click', updateOrangeBannerPrice);
+          element.addEventListener('change', updateOrangeBannerPrice);
+          element.addEventListener('click', updateOrangeBannerPrice);
+        });
+      }
+
+      const observerOrange = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList' || mutation.type === 'attributes') {
+            updateOrangeBannerPrice();
+          }
+        });
+      });
+
+      const targetNode = document.querySelector('.product-form, .product, main, body');
+      if (targetNode) {
+        observerOrange.observe(targetNode, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'data-variant-id', 'checked', 'selected']
+        });
+      }
+
+      function initOrange() {
+        attachAllListenersOrange();
+        updateOrangeBannerPrice();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initOrange);
+      } else {
+        initOrange();
+      }
+
+      setInterval(attachAllListenersOrange, 2000);
+    })();
+  </script>
+{% endif %}
